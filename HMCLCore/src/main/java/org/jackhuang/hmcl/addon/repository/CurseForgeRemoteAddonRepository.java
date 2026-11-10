@@ -262,12 +262,16 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
 
     @Override
     public RemoteAddon.File getAddonFile(String projectId, String fileId) throws IOException {
+        return getAddonVersion(projectId, fileId).file();
+    }
+
+    public RemoteAddon.Version getAddonVersion(String projectId, String fileId) throws IOException {
         SEMAPHORE.acquireUninterruptibly();
         try {
             Response<CurseAddon.LatestFile> response = withApiKey(HttpRequest.GET(String.format("%s/v1/mods/%s/files/%s", PREFIX, projectId, fileId)))
                     .retry(DEFAULT_RETRY_COUNT)
                     .getJson(Response.typeOf(CurseAddon.LatestFile.class));
-            return response.data().toVersion().file();
+            return response.data().toVersion();
         } finally {
             SEMAPHORE.release();
         }

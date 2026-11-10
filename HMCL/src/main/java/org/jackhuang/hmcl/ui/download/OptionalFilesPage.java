@@ -6,10 +6,13 @@ import com.jfoenix.controls.JFXButton;
 import com.jfoenix.controls.JFXCheckBox;
 import com.jfoenix.controls.JFXDialogLayout;
 import com.jfoenix.controls.JFXListView;
+
+import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.value.ObservableBooleanValue;
+import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
 import javafx.collections.ObservableSet;
 import javafx.collections.SetChangeListener;
@@ -22,6 +25,7 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
+
 import org.jackhuang.hmcl.addon.RemoteAddon;
 import org.jackhuang.hmcl.modpack.ModpackFile;
 import org.jackhuang.hmcl.task.Schedulers;
@@ -34,13 +38,19 @@ import org.jackhuang.hmcl.ui.construct.JFXHyperlink;
 import org.jackhuang.hmcl.ui.construct.MDListCell;
 import org.jackhuang.hmcl.ui.construct.SpinnerPane;
 import org.jackhuang.hmcl.ui.construct.TwoLineListItem;
+import org.jackhuang.hmcl.ui.construct.MessageDialogPane;
 import org.jackhuang.hmcl.ui.wizard.WizardPage;
 import org.jackhuang.hmcl.util.SettingsMap;
+import org.jackhuang.hmcl.util.TwoSatSet;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 import static org.jackhuang.hmcl.ui.FXUtils.onEscPressed;
@@ -59,8 +69,16 @@ public class OptionalFilesPage extends SpinnerPane implements WizardPage {
     /// Keys of files the user unchecked; empty means all optional files will be installed.
     private final ObservableSet<String> excludedFiles;
 
+    /// The two-satisfiability set representing dependency constraints among optional files.
+    
     /// Per-file selected state mirrored from [#excludedFiles] (`true` means install / not excluded).
     private final Map<String, BooleanProperty> selectedByKey = new HashMap<>();
+    
+    /// The two-satisfiability instance for optional files, created from the current list of optional files and excluded files.
+    private TwoSatSet<String> twoSatSet;
+
+    /// Whether we check the dependency constraints among optional files.
+    private final BooleanProperty checkDependencies = new SimpleBooleanProperty(true);
 
     /// Whether [#selectedByKey] is being updated from an [#excludedFiles] set change.
     private boolean updatingFromSet;
@@ -116,8 +134,14 @@ public class OptionalFilesPage extends SpinnerPane implements WizardPage {
         {
             var descPane = new BorderPane();
             HBox selectionButtons = new HBox(8);
+            selectionButtons.setAlignment(Pos.CENTER_LEFT);
             JFXButton btnSelectAll = FXUtils.newBorderButton(i18n("button.select_all"));
-            btnSelectAll.setOnAction(e -> excludedFiles.clear());
+            btnSelectAll.setOnAction(e -> {
+                if (checkDependencies.get())
+                    twoSatSet.minimize();
+                else
+                    excludedFiles.clear();
+            });
             JFXButton btnClear = FXUtils.newBorderButton(i18n("button.clear"));
             btnClear.setOnAction(e -> {
                 excludedFiles.clear();
@@ -125,12 +149,25 @@ public class OptionalFilesPage extends SpinnerPane implements WizardPage {
                     excludedFiles.add(file.key());
                 }
             });
-            selectionButtons.getChildren().setAll(btnSelectAll, btnClear);
+            JFXCheckBox chkCheckDependencies = new JFXCheckBox(i18n("modpack.optional_files.check_dependencies"));
+            chkCheckDependencies.selectedProperty().bindBidirectional(checkDependencies);
+            selectionButtons.getChildren().setAll(btnSelectAll, btnClear, chkCheckDependencies);
             descPane.setLeft(selectionButtons);
 
             var btnInstall = FXUtils.newRaisedButton(i18n("button.install"));
             descPane.setRight(btnInstall);
-            btnInstall.setOnAction(e -> install.run());
+            btnInstall.setOnAction(e -> {
+                if (checkDependencies.get() && !twoSatSet.satisfied()) {
+                    Controllers.dialog(new MessageDialogPane.Builder(
+                            i18n("modpack.optional_files.unsatisfied_dependencies"),
+                            i18n("message.warning"),
+                            MessageDialogPane.MessageType.QUESTION)
+                                .yesOrNo(install, () -> {})
+                            .build());
+                } else {
+                    install.run();
+                }
+            });
             tail.getChildren().add(descPane);
         }
 
@@ -144,6 +181,11 @@ public class OptionalFilesPage extends SpinnerPane implements WizardPage {
         body.setMaxHeight(Region.USE_PREF_SIZE);
         body.setCellFactory(it -> new OptionalFileEntry(body));
         body.setItems(optionalFiles);
+
+        optionalFiles.addListener((ListChangeListener<ModpackFile>) c -> {
+            twoSatSet = createFilesTwoSatInstance(optionalFiles, excludedFiles);
+        });
+        twoSatSet = createFilesTwoSatInstance(optionalFiles, excludedFiles);
 
         Runnable refreshContent = () -> {
             if (successful.get()) {
@@ -170,10 +212,31 @@ public class OptionalFilesPage extends SpinnerPane implements WizardPage {
             selected.addListener((obs, wasSelected, isSelected) -> {
                 if (updatingFromSet)
                     return;
-                if (isSelected) {
-                    excludedFiles.remove(k);
+                if (!checkDependencies.get()) {
+                    if (isSelected) {
+                        excludedFiles.remove(k);
+                    } else {
+                        excludedFiles.add(k);
+                    }
                 } else {
-                    excludedFiles.add(k);
+                    if (isSelected) {
+                        twoSatSet.remove(k);
+                    } else {
+                        twoSatSet.add(k);
+                    }
+                    if (excludedFiles.contains(k)) {
+                        Platform.runLater(() -> {
+                            updatingFromSet = true;
+                            selected.set(false);
+                            updatingFromSet = false;
+                        });
+                    } else {
+                        Platform.runLater(() -> {
+                            updatingFromSet = true;
+                            selected.set(true);
+                            updatingFromSet = false;
+                        });
+                    }
                 }
             });
             return selected;
@@ -302,5 +365,30 @@ public class OptionalFilesPage extends SpinnerPane implements WizardPage {
 
     @Override
     public void cleanup(SettingsMap settings) {
+    }
+
+    private static TwoSatSet<String> createFilesTwoSatInstance(List<? extends ModpackFile> files, Set<String> exclusionSet) {
+        var s = new TwoSatSet<>(exclusionSet);
+        var idToFileMap = new HashMap<String, List<ModpackFile>>();
+        for (var file : files) {
+            String projectId = file.projectIdString();
+            if (projectId != null)
+                idToFileMap.computeIfAbsent(projectId, k -> new ArrayList<>()).add(file);
+        }
+        for (var file : files) {
+            var deps = file.dependencies();
+            if (!file.optional() || deps == null)
+                continue;
+            for (var dependency : deps) {
+                switch (dependency.getType()) {
+                    case REQUIRED -> idToFileMap.getOrDefault(dependency.getId(), Collections.emptyList())
+                            .forEach(depFile -> s.or(s.present(file.key()), s.absent(depFile.key())));
+                    case INCOMPATIBLE -> idToFileMap.getOrDefault(dependency.getId(), Collections.emptyList())
+                            .forEach(depFile -> s.or(s.present(file.key()), s.present(depFile.key())));
+                    default -> {} // Optional/Embedded, no action needed
+                }
+            }
+        }
+        return s;
     }
 }

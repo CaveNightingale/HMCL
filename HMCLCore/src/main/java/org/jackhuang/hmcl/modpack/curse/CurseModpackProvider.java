@@ -88,10 +88,10 @@ public final class CurseModpackProvider implements ModpackProvider {
                             }
                             try {
                                 CurseManifestFile result = file;
-                                if (StringUtils.isBlank(file.fileName()) || file.url() == null) {
-                                    RemoteAddon.File remoteFile = CurseForgeRemoteAddonRepository.getInstance().getAddonFile(
+                                if (StringUtils.isBlank(file.fileName()) || file.url() == null || !file.addonQueried()) {
+                                    RemoteAddon.Version remoteFile = CurseForgeRemoteAddonRepository.getInstance().getAddonVersion(
                                             Integer.toString(file.projectID()), Integer.toString(file.fileID()));
-                                    result = result.withFileName(remoteFile.filename()).withURL(remoteFile.url());
+                                    result = result.withFileName(remoteFile.file().filename()).withURL(remoteFile.file().url()).withDependencies(remoteFile.dependencies());
                                 }
                                 if (!file.addonQueried()) {
                                     RemoteAddon addon = CurseForgeRemoteAddonRepository.getInstance().getAddonById(

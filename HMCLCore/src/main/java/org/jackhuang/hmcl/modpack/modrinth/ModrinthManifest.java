@@ -4,6 +4,7 @@ package org.jackhuang.hmcl.modpack.modrinth;
 
 import com.google.gson.JsonParseException;
 import org.jackhuang.hmcl.addon.RemoteAddon;
+import org.jackhuang.hmcl.addon.repository.ModrinthRemoteAddonRepository;
 import org.jackhuang.hmcl.modpack.ModpackFile;
 import org.jackhuang.hmcl.modpack.ModpackManifest;
 import org.jackhuang.hmcl.modpack.ModpackProvider;
@@ -149,6 +150,7 @@ public class ModrinthManifest implements ModpackManifest, ModpackManifest.Suppor
             List<String> downloads,
             int fileSize,
             @Nullable RemoteAddon remoteAddon,
+            @Nullable List<RemoteAddon.Dependency> dependencies,
             boolean addonQueried) implements Validation, ModpackFile {
 
         /// Creates a file entry that has not been queried for remote addon metadata.
@@ -159,7 +161,7 @@ public class ModrinthManifest implements ModpackManifest, ModpackManifest.Suppor
         /// @param downloads the download URLs
         /// @param fileSize  the file size
         public File(String path, Map<String, String> hashes, @Nullable Map<String, String> env, List<String> downloads, int fileSize) {
-            this(path, hashes, env, downloads, fileSize, null, false);
+            this(path, hashes, env, downloads, fileSize, null, null, false);
         }
 
         @Override
@@ -190,14 +192,20 @@ public class ModrinthManifest implements ModpackManifest, ModpackManifest.Suppor
         /// Returns a copy marked as queried, with the given remote addon metadata.
         ///
         /// @param remoteAddon the remote addon, or `null` when not found
+        /// @param dependencies the list of dependencies, or `null` when not found
         /// @return the updated file entry
-        public File withAddon(@Nullable RemoteAddon remoteAddon) {
-            return new File(path, hashes, env, downloads, fileSize, remoteAddon, true);
+        public File withAddonAndDependencies(@Nullable RemoteAddon remoteAddon, @Nullable List<RemoteAddon.Dependency> dependencies) {
+            return new File(path, hashes, env, downloads, fileSize, remoteAddon, dependencies, true);
         }
 
         @Override
         public boolean optional() {
             return env != null && "optional".equals(env.get("client"));
+        }
+
+        @Override
+        public @Nullable String projectIdString() {
+            return this.remoteAddon == null ? null : ((ModrinthRemoteAddonRepository.Project) this.remoteAddon.data()).id();
         }
 
         @Override

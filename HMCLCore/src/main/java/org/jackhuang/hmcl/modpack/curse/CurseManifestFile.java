@@ -42,6 +42,7 @@ public record CurseManifestFile(
         @SerializedName("required") boolean required,
         @SerializedName("hashes") @Nullable Map<String, @Nullable String> hashes,
         @Nullable RemoteAddon remoteAddon,
+        @Nullable List<RemoteAddon.Dependency> dependencies,
         boolean addonQueried) implements Validation, ModpackFile {
 
     /// Supported manifest hash names and digest algorithms, in selection order.
@@ -60,7 +61,7 @@ public record CurseManifestFile(
     /// @param url       the download URL, or `null`
     /// @param required  whether the file is required
     public CurseManifestFile(int projectID, int fileID, @Nullable String fileName, @Nullable String url, boolean required) {
-        this(projectID, fileID, fileName, url, required, null, null, false);
+        this(projectID, fileID, fileName, url, required, null, null, null, false);
     }
 
     /// Returns `curseforge:<projectID>:<fileID>` as the exclusion key.
@@ -104,6 +105,11 @@ public record CurseManifestFile(
         }
     }
 
+    @Override
+    public String projectIdString() {
+        return Integer.toString(projectID);
+    }
+
     /// Returns an integrity check using the first non-null checksum under the keys
     /// `sha1`, `sha256`, `sha512`, and `md5`, in that order.
     ///
@@ -125,7 +131,7 @@ public record CurseManifestFile(
     /// @param fileName the resolved file name
     /// @return the updated entry
     public CurseManifestFile withFileName(String fileName) {
-        return new CurseManifestFile(projectID, fileID, fileName, url, required, hashes, remoteAddon, addonQueried);
+        return new CurseManifestFile(projectID, fileID, fileName, url, required, hashes, remoteAddon, dependencies, addonQueried);
     }
 
     /// Returns a copy with a resolved download URL, retaining all other fields.
@@ -133,7 +139,7 @@ public record CurseManifestFile(
     /// @param url the download URL
     /// @return the updated entry
     public CurseManifestFile withURL(String url) {
-        return new CurseManifestFile(projectID, fileID, fileName, url, required, hashes, remoteAddon, addonQueried);
+        return new CurseManifestFile(projectID, fileID, fileName, url, required, hashes, remoteAddon, dependencies, addonQueried);
     }
 
     /// Returns a copy marked as queried, with the given remote addon metadata.
@@ -141,7 +147,7 @@ public record CurseManifestFile(
     /// @param remoteAddon the remote addon, or `null` when not found
     /// @return the updated entry, retaining all other fields
     public CurseManifestFile withAddon(@Nullable RemoteAddon remoteAddon) {
-        return new CurseManifestFile(projectID, fileID, fileName, url, required, hashes, remoteAddon, true);
+        return new CurseManifestFile(projectID, fileID, fileName, url, required, hashes, remoteAddon, dependencies, true);
     }
 
     /// Returns a copy with the given checksums, retaining all other fields.
@@ -150,7 +156,15 @@ public record CurseManifestFile(
     ///               `null` removes the checksums
     /// @return the updated entry
     public CurseManifestFile withHashes(@Nullable Map<String, @Nullable String> hashes) {
-        return new CurseManifestFile(projectID, fileID, fileName, url, required, hashes, remoteAddon, addonQueried);
+        return new CurseManifestFile(projectID, fileID, fileName, url, required, hashes, remoteAddon, dependencies, addonQueried);
+    }
+
+    /// Returns a copy with the given dependencies, retaining all other fields.
+    /// @param dependencies the list of dependencies, retained without copying;
+    ///                     `null` removes the dependencies
+    /// @return the updated entry
+    public CurseManifestFile withDependencies(@Nullable List<RemoteAddon.Dependency> dependencies) {
+        return new CurseManifestFile(projectID, fileID, fileName, url, required, hashes, remoteAddon, dependencies, addonQueried);
     }
 
     /// Returns whether the other object is a file entry with the same project and file ids.

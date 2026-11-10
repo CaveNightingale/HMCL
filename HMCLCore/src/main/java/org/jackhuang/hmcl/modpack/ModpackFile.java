@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
 package org.jackhuang.hmcl.modpack;
 
+import java.util.List;
+
 import org.jackhuang.hmcl.addon.RemoteAddon;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -37,6 +39,18 @@ public interface ModpackFile {
     /// @return the remote addon, or `null` when not found or not yet queried
     @Nullable
     RemoteAddon remoteAddon();
+
+    /// Returns the list of dependencies for this file when [#addonQueried()] is `true`.
+    ///
+    /// @return the list of dependencies, or `null` when not found or not yet queried
+    @Nullable
+    List<RemoteAddon.Dependency> dependencies();
+
+    /// Get the project ID of the remote addon associated with this file, or `null` when not available.
+    ///
+    /// @return the project ID, or `null`
+    @Nullable
+    String projectIdString();
 
     /// Returns whether remote addon metadata has been queried for this file.
     ///
