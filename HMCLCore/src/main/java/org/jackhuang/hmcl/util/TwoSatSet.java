@@ -1,8 +1,12 @@
+// SPDX-FileCopyrightText: Copyright (C) 2026 The HMCL Authors
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-HMCL
 package org.jackhuang.hmcl.util;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.List;
 import java.util.ArrayList;
 
@@ -85,14 +89,18 @@ public class TwoSatSet<T> {
     }
 
     public boolean apply(int start) {
+        return apply(start, underlying::add, underlying::remove);
+    }
+
+    public boolean apply(int start, Consumer<T> add, Consumer<T> remove) {
         boolean[] visited = new boolean[vertCount];
         if (!dfs(start, visited))
             return false;
         for (int i = 0; i < variableList.size(); i++) {
             if (visited[i << 1] && !underlying.contains(variableList.get(i)))
-                underlying.add(variableList.get(i));
+                add.accept(variableList.get(i));
             else if (visited[(i << 1) | 1] && underlying.contains(variableList.get(i)))
-                underlying.remove(variableList.get(i));
+                remove.accept(variableList.get(i));
         }
         return true;
     }
@@ -128,13 +136,35 @@ public class TwoSatSet<T> {
         return true;
     }
 
-    public boolean satisfied() {
-        for (int i = 0; i < variableList.size(); i++) {
-            int u = (i << 1) | (underlying.contains(variableList.get(i)) ? 0 : 1);
-            for (int e = vertHead[u]; e != -1; e = edgeNext[e])
-                if (underlying.contains(edgeTo[e] >> 1) ^ (edgeTo[e] & 1) == 0)
-                    return false;
-        }
+    private boolean directViolation(int u) {
+        for (int e = vertHead[u]; e != -1; e = edgeNext[e])
+            if (underlying.contains(variableList.get(edgeTo[e] >> 1)) ^ (edgeTo[e] & 1) == 0)
+                return false;
         return true;
+    }
+
+    public boolean variableSatisfied(T variable) {
+        Integer index = variableMap.get(variable);
+        return index == null || directViolation((index << 1) | (underlying.contains(variable) ? 0 : 1));
+    }
+
+    public Set<T> unsatifiedVariables() {
+        HashSet<T> unsatisfied = new HashSet<>();
+        for (int i = 0; i < variableList.size(); i++)
+            if (!directViolation((i << 1) | (underlying.contains(variableList.get(i)) ? 0 : 1)))
+                unsatisfied.add(variableList.get(i));
+        return unsatisfied;
+    }
+
+    public Set<T> violatedVariables(T variable) {
+        HashSet<T> violated = new HashSet<>();
+        Integer index = variableMap.get(variable);
+        if (index != null) {
+            int u = (index << 1) | (underlying.contains(variable) ? 0 : 1);
+            for (int e = vertHead[u]; e != -1; e = edgeNext[e])
+                if (underlying.contains(variableList.get(edgeTo[e] >> 1)) ^ (edgeTo[e] & 1) == 0)
+                    violated.add(variableList.get(edgeTo[e] >> 1));
+        }
+        return violated;
     }
 }

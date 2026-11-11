@@ -9,8 +9,11 @@ import com.jfoenix.controls.JFXListView;
 
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
+import javafx.beans.binding.BooleanBinding;
 import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.SimpleBooleanProperty;
+import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.value.ObservableBooleanValue;
 import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
@@ -66,16 +69,17 @@ public class OptionalFilesPage extends SpinnerPane implements WizardPage {
     /// Maximum list viewport height before scrolling.
     private static final double MAX_LIST_HEIGHT = 320;
 
+    /// The list of optional files to display.
+    private final ObservableList<ModpackFile> optionalFiles;
+
     /// Keys of files the user unchecked; empty means all optional files will be installed.
     private final ObservableSet<String> excludedFiles;
 
-    /// The two-satisfiability set representing dependency constraints among optional files.
-    
     /// Per-file selected state mirrored from [#excludedFiles] (`true` means install / not excluded).
     private final Map<String, BooleanProperty> selectedByKey = new HashMap<>();
-    
+
     /// The two-satisfiability instance for optional files, created from the current list of optional files and excluded files.
-    private TwoSatSet<String> twoSatSet;
+    private final ObjectProperty<TwoSatSet<String>> twoSatSet = new SimpleObjectProperty<>();
 
     /// Whether we check the dependency constraints among optional files.
     private final BooleanProperty checkDependencies = new SimpleBooleanProperty(true);
@@ -102,6 +106,7 @@ public class OptionalFilesPage extends SpinnerPane implements WizardPage {
             ObservableList<ModpackFile> optionalFiles,
             ObservableSet<String> excludedFiles) {
         this.excludedFiles = excludedFiles;
+        this.optionalFiles = optionalFiles;
         excludedFiles.addListener((SetChangeListener<String>) change -> {
             updatingFromSet = true;
             try {
@@ -138,7 +143,7 @@ public class OptionalFilesPage extends SpinnerPane implements WizardPage {
             JFXButton btnSelectAll = FXUtils.newBorderButton(i18n("button.select_all"));
             btnSelectAll.setOnAction(e -> {
                 if (checkDependencies.get())
-                    twoSatSet.minimize();
+                    twoSatSet.get().minimize();
                 else
                     excludedFiles.clear();
             });
@@ -157,7 +162,7 @@ public class OptionalFilesPage extends SpinnerPane implements WizardPage {
             var btnInstall = FXUtils.newRaisedButton(i18n("button.install"));
             descPane.setRight(btnInstall);
             btnInstall.setOnAction(e -> {
-                if (checkDependencies.get() && !twoSatSet.satisfied()) {
+                if (checkDependencies.get() && !twoSatSet.get().unsatifiedVariables().isEmpty()) {
                     Controllers.dialog(new MessageDialogPane.Builder(
                             i18n("modpack.optional_files.unsatisfied_dependencies"),
                             i18n("message.warning"),
@@ -183,9 +188,9 @@ public class OptionalFilesPage extends SpinnerPane implements WizardPage {
         body.setItems(optionalFiles);
 
         optionalFiles.addListener((ListChangeListener<ModpackFile>) c -> {
-            twoSatSet = createFilesTwoSatInstance(optionalFiles, excludedFiles);
+            twoSatSet.set(createFilesTwoSatInstance(optionalFiles, excludedFiles));
         });
-        twoSatSet = createFilesTwoSatInstance(optionalFiles, excludedFiles);
+        twoSatSet.set(createFilesTwoSatInstance(optionalFiles, excludedFiles));
 
         Runnable refreshContent = () -> {
             if (successful.get()) {
@@ -220,9 +225,9 @@ public class OptionalFilesPage extends SpinnerPane implements WizardPage {
                     }
                 } else {
                     if (isSelected) {
-                        twoSatSet.remove(k);
+                        twoSatSet.get().remove(k);
                     } else {
-                        twoSatSet.add(k);
+                        twoSatSet.get().add(k);
                     }
                     if (excludedFiles.contains(k)) {
                         Platform.runLater(() -> {
@@ -247,6 +252,7 @@ public class OptionalFilesPage extends SpinnerPane implements WizardPage {
     private final class OptionalFileEntry extends MDListCell<ModpackFile> {
         private final JFXCheckBox checkBox = new JFXCheckBox();
         private final TwoLineListItem content = new TwoLineListItem();
+        private final JFXButton brokenButton = new JFXButton();
         private final JFXButton infoButton = new JFXButton();
         private final HBox container = new HBox(8);
 
@@ -264,9 +270,11 @@ public class OptionalFilesPage extends SpinnerPane implements WizardPage {
             setSelectable();
             container.getChildren().setAll(checkBox, content);
 
+            brokenButton.getStyleClass().add("toggle-icon4");
+            brokenButton.setGraphic(SVG.WARNING.createIcon());
             infoButton.getStyleClass().add("toggle-icon4");
             infoButton.setGraphic(SVG.INFO.createIcon());
-            container.getChildren().add(infoButton);
+            container.getChildren().addAll(brokenButton, infoButton);
             getContainer().getChildren().setAll(container);
         }
 
@@ -291,11 +299,46 @@ public class OptionalFilesPage extends SpinnerPane implements WizardPage {
                 infoButton.setOnMouseClicked(e -> Controllers.dialog(new ModInfo(addon)));
                 infoButton.setManaged(true);
                 infoButton.setVisible(true);
+                BooleanBinding unsatisfied = Bindings.createBooleanBinding(() -> {
+                    TwoSatSet<String> twoSat = twoSatSet.get();
+                    if (twoSat == null)
+                        return false;
+                    return !twoSat.variableSatisfied(item.key());
+                }, twoSatSet, excludedFiles);
+                brokenButton.visibleProperty().bind(unsatisfied);
+                brokenButton.managedProperty().bind(unsatisfied);
+                brokenButton.setOnMouseClicked(e -> {
+                    StringBuilder sb = new StringBuilder(i18n(
+                            excludedFiles.contains(item.key())
+                                    ? "modpack.optional_files.dependencies.exclude"
+                                    : "modpack.optional_files.dependencies.include",
+                            item.fileName())).append('\n');
+                    var violated = twoSatSet.get().violatedVariables(item.key());
+                    for (var file : optionalFiles) {
+                        if (violated.contains(file.key())) {
+                            sb.append(" - ").append(i18n(
+                                    excludedFiles.contains(file.key())
+                                            ? "modpack.optional_files.dependencies.include_file"
+                                            : "modpack.optional_files.dependencies.exclude_file",
+                                    file.fileName())).append('\n');
+                        }
+                    }
+                    Controllers.dialog(new MessageDialogPane.Builder(
+                            sb.toString(),
+                            i18n("modpack.optional_files.dependencies.title"),
+                            MessageDialogPane.MessageType.WARNING).ok(() -> {})
+                            .build());
+                });
             } else {
                 content.setSubtitle("");
                 infoButton.setOnMouseClicked(null);
                 infoButton.setManaged(false);
                 infoButton.setVisible(false);
+                brokenButton.visibleProperty().unbind();
+                brokenButton.setVisible(false);
+                brokenButton.managedProperty().unbind();
+                brokenButton.setManaged(false);
+                brokenButton.setOnMouseClicked(null);
             }
             BooleanProperty selected = OptionalFilesPage.this.selectedProperty(item.key());
             if (boundSelected != selected) {
@@ -385,7 +428,7 @@ public class OptionalFilesPage extends SpinnerPane implements WizardPage {
                             .forEach(depFile -> s.or(s.present(file.key()), s.absent(depFile.key())));
                     case INCOMPATIBLE -> idToFileMap.getOrDefault(dependency.getId(), Collections.emptyList())
                             .forEach(depFile -> s.or(s.present(file.key()), s.present(depFile.key())));
-                    default -> {} // Optional/Embedded, no action needed
+                    default -> { } // Optional/Embedded, no action needed
                 }
             }
         }
